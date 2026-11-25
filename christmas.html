@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#040b14">
+<title>星光圣诞树</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;color:#eff7fb;background:#040b14;font:16px/1.55 "PingFang SC","Microsoft YaHei",sans-serif}
+main{position:relative;isolation:isolate;display:grid;grid-template-rows:auto 1fr auto;min-height:100vh;min-height:100svh;padding:calc(22px + env(safe-area-inset-top)) 18px calc(22px + env(safe-area-inset-bottom));background:radial-gradient(ellipse at 50% 58%,#102838 0%,#081522 42%,#040b14 78%)}
+canvas{position:absolute;inset:0;width:100%;height:100%;z-index:-1}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;width:min(100%,1050px);margin:auto}
+header span{letter-spacing:.14em;color:#c1d9e6}
+button,input{font:inherit}
+button{color:#eaf7ff;background:#0d1b28;border:1px solid #365162;border-radius:999px;padding:8px 15px;min-height:44px;cursor:pointer}
+button:hover{background:#193244}
+button:focus-visible,input:focus-visible{outline:2px solid #b7e9ff;outline-offset:3px}
+#stage{min-height:250px;touch-action:none;cursor:grab}
+#stage:active{cursor:grabbing}
+footer{text-align:center;width:min(100%,690px);margin:auto}
+h1{margin:0;color:#f7f9fd;font:italic clamp(36px,8vw,72px)/1.02 Georgia,serif;letter-spacing:-.045em;text-shadow:0 0 35px #b6ecff70}
+#greeting{margin:10px 0 15px;color:#bdd6e3;max-height:3.3em;overflow:auto;overflow-wrap:anywhere}
+.hint{margin:11px 0 0;font-size:14px;color:#a6c0cf}
+.primary{background:#d8f2ff;color:#102536;border-color:#d8f2ff}
+.primary:hover{background:#fff}
+dialog{background:#10202e;color:#eff7fb;border:1px solid #476577;border-radius:18px;width:min(430px,calc(100% - 28px));padding:20px;max-height:90vh;overflow:auto}
+dialog::backdrop{background:#030912bc}
+dialog h2{margin:0 0 12px;font-size:21px}
+input{display:block;width:100%;margin:8px 0 14px;border:1px solid #476577;border-radius:8px;background:#071623;color:inherit;padding:9px}
+.buttons{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.note{color:#bdd6e3;font-size:14px}
+@media(max-height:570px){#stage{min-height:180px}main{padding-block:12px}h1{font-size:35px}}
+</style>
+</head>
+<body>
+<main id="scene">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <header><span>星光圣诞树</span><button id="edit" type="button">写祝福</button></header>
+  <div id="stage" aria-hidden="true"></div>
+  <footer>
+    <h1 lang="en">Merry Christmas</h1>
+    <p id="greeting"></p>
+    <div class="buttons"><button class="primary" id="replay" type="button">重看生长</button><button id="snow" type="button">撒一场雪</button><button id="share" type="button">分享</button></div>
+    <p class="hint">轻点树旁撒雪 · 左右拖动旋转</p>
+  </footer>
+</main>
+<dialog id="editor" aria-labelledby="editTitle">
+  <form id="form">
+    <h2 id="editTitle">写一份圣诞祝福</h2>
+    <label>祝福语<input id="wish" maxlength="80"></label>
+    <div class="buttons"><button id="cancel" type="button">取消</button><button class="primary">保存祝福</button></div>
+  </form>
+</dialog>
+<dialog id="shareDialog" aria-labelledby="shareTitle">
+  <h2 id="shareTitle">分享圣诞树</h2>
+  <p class="note" id="shareNote"></p>
+  <input id="link" aria-label="分享链接" readonly>
+  <div class="buttons"><button id="closeShare" type="button">关闭</button><button class="primary" id="copy" type="button">复制链接</button></div>
+</dialog>
+<script>
+'use strict';
+const el = id => document.getElementById(id);
+const canvas = el('sky'), scene = el('scene'), stage = el('stage');
+const ctx = canvas.getContext('2d');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const tau = Math.PI * 2;
+const random = (min,max) => min + Math.random() * (max-min);
+const clamp = value => Math.max(0,Math.min(1,value));
+const defaultGreeting = '愿今夜的星光，把温暖送到你身边。';
+let greeting = (new URLSearchParams(location.hash.slice(1)).get('wish') || '').trim().slice(0,80) || defaultGreeting;
+el('greeting').textContent = greeting;
+
+const mobile = matchMedia('(pointer: coarse)').matches;
+const branches = Array.from({length:mobile?2000:3400},()=>{
+  const y = Math.random() ** 1.4;
+  const layer = (y * 7) % 1;
+  const radius = (1-y)**.92 * (0.78+layer*.22) * random(.56,1.06);
+  return {y, radius, angle:random(0,tau), phase:random(0,tau), size:Math.random()};
+});
+const ribbon = Array.from({length:680},(_,index)=>{
+  const y=index/679;
+  return {y, radius:(1-y)**.92*1.065,angle:y*tau*6.25};
+});
+const flakes = Array.from({length:mobile?105:175},()=>({
+  x:Math.random(), y:Math.random(), speed:random(.012,.067), size:random(.45,1.5), phase:random(0,tau)
+}));
+function sprite(core,halo) {
+  const image=document.createElement('canvas');
+  image.width=image.height=32;
+  const pen=image.getContext('2d'), gradient=pen.createRadialGradient(16,16,0,16,16,16);
+  gradient.addColorStop(0,core);
+  gradient.addColorStop(.25,core+'cb');
+  gradient.addColorStop(.52,halo+'60');
+  gradient.addColorStop(1,halo+'00');
+  pen.fillStyle=gradient;
+  pen.fillRect(0,0,32,32);
+  return image;
+}
+const ice=sprite('#e5f9ff','#5bc7ff'), white=sprite('#fff8de','#8ed9ff');
+let width=0,height=0,x=0,ground=0,treeHeight=0,treeRadius=0;
+function resize() {
+  const frame=scene.getBoundingClientRect(), area=stage.getBoundingClientRect();
+  width=frame.width; height=frame.height;
+  x=width/2;
+  treeHeight=Math.min(area.height*.79,width*.975,480);
+  treeRadius=treeHeight*.35;
+  ground=area.top-frame.top+(area.height+treeHeight)*.5;
+  const scale=Math.min(devicePixelRatio || 1,mobile?1.5:2);
+  canvas.width=Math.round(width*scale); canvas.height=Math.round(height*scale);
+  ctx.setTransform(scale,0,0,scale,0,0);
+}
+const snow=[];
+let started=performance.now(), turn=0, drag=null;
+function scatter(sx,sy) {
+  if (reduced.matches) return;
+  const now=performance.now();
+  for (let i=0;i<60;i++) {
+    const a=random(0,tau), speed=random(15,135);
+    snow.push({x:sx,y:sy,dx:Math.cos(a)*speed,dy:Math.sin(a)*speed-38,at:now,life:random(.65,1.55)});
+  }
+  if (snow.length>300) snow.splice(0,snow.length-300);
+}
+function dot(image,sx,sy,radius,opacity) {
+  ctx.globalAlpha=clamp(opacity);
+  ctx.drawImage(image,sx-radius,sy-radius,radius*2,radius*2);
+}
+function star(cx,cy,radius,opacity) {
+  dot(white,cx,cy,radius*2.9,opacity*.77);
+  ctx.globalAlpha=opacity;
+  ctx.fillStyle='#fff8e2';
+  ctx.beginPath();
+  for (let i=0;i<10;i++) {
+    const a=i*Math.PI/5-Math.PI/2,r=i%2?radius*.38:radius;
+    const px=cx+Math.cos(a)*r,py=cy+Math.sin(a)*r;
+    if (i) ctx.lineTo(px,py); else ctx.moveTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+function draw(now) {
+  const still=reduced.matches, time=now/1000, age=(now-started)/1000;
+  const growth=still?1:clamp((age-.25)/5.0);
+  const angle=turn+(still?0:time*.26);
+  ctx.clearRect(0,0,width,height);
+  ctx.fillStyle='#d2effe';
+  for (const flake of flakes) {
+    const sy=(flake.y+(still?0:time*flake.speed))%1*height;
+    const sx=flake.x*width+(still?0:Math.sin(time*.55+flake.phase)*11);
+    ctx.globalAlpha=.23+.16*Math.sin((still?0:time)+flake.phase);
+    ctx.fillRect(sx,sy,flake.size,flake.size);
+  }
+  ctx.strokeStyle='#9ddcf7';
+  for (let i=0;i<4;i++) {
+    const r=treeRadius*(1.07+i*.24);
+    ctx.globalAlpha=(.29-i*.048)*clamp(age*3+.45);
+    ctx.beginPath();
+    ctx.ellipse(x,ground,r,r*.16,0,0,tau);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation='lighter';
+  function project(p) {
+    const a=p.angle+angle, depth=Math.sin(a)*p.radius;
+    return [x+Math.cos(a)*treeRadius*p.radius*(1+depth*.1),
+      ground-p.y*treeHeight+depth*treeRadius*.146,depth];
+  }
+  for (const p of branches) {
+    const fade=still?1:clamp((growth-p.y)*17);
+    if (fade===0) continue;
+    const [sx,sy,depth]=project(p);
+    const twinkle=.72+.27*Math.sin((still?0:time*2.2)+p.phase);
+    dot(p.size>.986?white:ice,sx,sy,1.15+p.size**3*2.2,fade*twinkle*(.47+depth*.19));
+  }
+  for (const p of ribbon) {
+    if (p.y>growth) break;
+    const [sx,sy,depth]=project(p);
+    const head=!still && growth<1 ? Math.max(0,1-(growth-p.y)*42) : 0;
+    dot(ice,sx,sy,1.75+head*3.6,.47+depth*.29+head*.4);
+  }
+  const crown=still?1:clamp((age-5.02)*2);
+  if (crown>0) star(x,ground-treeHeight-11,Math.max(8,treeHeight*.031),crown);
+  for (let i=snow.length-1;i>=0;i--) {
+    const p=snow[i], t=(now-p.at)/1000;
+    if (t>=p.life) { snow.splice(i,1); continue; }
+    dot(ice,p.x+p.dx*t,p.y+p.dy*t+55*t*t,2.5,1-t/p.life);
+  }
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation='source-over';
+  requestAnimationFrame(draw);
+}
+stage.addEventListener('pointerdown',event=>{
+  if (!event.isPrimary || event.button!==0) return;
+  drag={id:event.pointerId,x:event.clientX,turn,moved:false};
+  stage.setPointerCapture(event.pointerId);
+});
+stage.addEventListener('pointermove',event=>{
+  if (drag?.id!==event.pointerId) return;
+  const dx=event.clientX-drag.x;
+  if (Math.abs(dx)>6) drag.moved=true;
+  if (drag.moved) turn=drag.turn+dx*.014;
+});
+stage.addEventListener('pointerup',event=>{
+  if (drag?.id!==event.pointerId) return;
+  if (!drag.moved) {
+    const bounds=scene.getBoundingClientRect();
+    scatter(event.clientX-bounds.left,event.clientY-bounds.top);
+  }
+  drag=null;
+});
+stage.addEventListener('lostpointercapture',()=>{drag=null});
+el('snow').addEventListener('click',()=>scatter(x,ground-treeHeight*.55));
+el('replay').addEventListener('click',()=>{started=performance.now();turn=0;});
+const editor=el('editor'), shareDialog=el('shareDialog');
+function shareURL() {
+  const url=new URL(location.href), data=new URLSearchParams();
+  if (greeting!==defaultGreeting) data.set('wish',greeting);
+  url.hash=data.toString();
+  return url.href;
+}
+el('edit').addEventListener('click',()=>{el('wish').value=greeting;editor.showModal();});
+el('cancel').addEventListener('click',()=>editor.close());
+el('form').addEventListener('submit',event=>{
+  event.preventDefault();
+  greeting=el('wish').value.trim() || defaultGreeting;
+  el('greeting').textContent=greeting;
+  const url=shareURL();
+  try { history.replaceState(null,'',url); } catch { location.hash=new URL(url).hash; }
+  editor.close();
+});
+el('share').addEventListener('click',()=>{
+  const online=location.protocol==='https:' || location.protocol==='http:';
+  el('link').hidden=el('copy').hidden=!online;
+  el('link').value=online?shareURL():'';
+  el('shareNote').textContent=online?'复制链接，再粘贴到微信聊天。好友打开时会看到你的祝福。':'网页发布到 GitHub Pages 后，就可以生成微信分享链接。';
+  shareDialog.showModal();
+});
+el('closeShare').addEventListener('click',()=>shareDialog.close());
+el('copy').addEventListener('click',async ()=>{
+  const field=el('link');
+  try {
+    await navigator.clipboard.writeText(field.value);
+    el('shareNote').textContent='链接已复制，可以发给微信好友。';
+  } catch {
+    field.focus();field.select();field.setSelectionRange(0,field.value.length);
+    el('shareNote').textContent='请长按链接并选择复制。';
+  }
+});
+new ResizeObserver(resize).observe(stage);
+window.addEventListener('resize',resize);
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
